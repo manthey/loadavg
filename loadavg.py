@@ -292,23 +292,26 @@ def query_service_loop(cmd="load", port=DefaultPort, interval=5,
     nexttime = time.time()
     first = True
     while True:
-        if not first or cmd != "run":
-            curtime = time.time()
-            if not collector:
-                val = query_service(cmd, port)
-            else:
-                val = collector.format(mode=cmd)
-            if Verbose:
-                print "%s %s" % (time.strftime(
-                    "%H:%M:%S", time.localtime(curtime)), val)
-            else:
-                sys.stdout.write('\r' + val)
-                sys.stdout.flush()
-        first = False
-        nexttime += interval
-        delay = nexttime-time.time()
-        if delay > 0:
-            time.sleep(delay)
+        try:
+            if not first or cmd != "run":
+                curtime = time.time()
+                if not collector:
+                    val = query_service(cmd, port)
+                else:
+                    val = collector.format(mode=cmd)
+                if Verbose:
+                    print "%s %s" % (time.strftime(
+                        "%H:%M:%S", time.localtime(curtime)), val)
+                else:
+                    sys.stdout.write('\r' + val)
+                    sys.stdout.flush()
+            first = False
+            nexttime += interval
+            delay = nexttime-time.time()
+            if delay > 0:
+                time.sleep(delay)
+        except KeyboardInterrupt:
+            break
 
 
 if __name__ == "__main__":
@@ -395,8 +398,6 @@ running the following:
     if mode == "service" or (mode == "run" and not frequency):
         while not collector.halt:
             time.sleep(5)
-
-        print query_service(mode, port)
     elif frequency:
         query_service_loop(mode, port, frequency, collector)
     else:

@@ -68,12 +68,20 @@ class LoadAvgCollect(threading.Thread):
         self.lock.release()
         return state
 
-    def getHistory(self):
+    def getHistory(self, fromdate=None):
         """Get the current history of the data collection.
+        Enter: fromdate: if not None, only return history on or after this
+                         epoch
         Exit:  history: history dictionary."""
         self.lock.acquire()
         history = copy.copy(self.history)
         self.lock.release()
+        if fromdate and "time" in history:
+            for pos in xrange(-2, -len(history["time"]), -1):
+                if history["time"][pos] < fromdate:
+                    for key in history:
+                        history[key] = history[key][pos + 1:]
+                    break
         return history
 
     def run(self):
@@ -183,7 +191,13 @@ class LoadAvgService(threading.Thread):
             state = self.collector.get()
             result = pprint.pformat(state).strip()
         elif cmd == "history":
-            history = self.collector.getHistory()
+            fromdate = None
+            if len(data.split(None, 1)) > 1:
+                try:
+                    fromdate = float(data.split(None, 1)[1])
+                except Exception:
+                    pass
+            history = self.collector.getHistory(fromdate)
             result = json.dumps(history)
         else:
             result = "failed - unknown command"
@@ -312,7 +326,7 @@ def query_service(cmd="load", port=DefaultPort):
         data.append(sock.recv(4096))
         if not len(data[-1]):
             break
-        timeout = 0
+        timeout = 0 if len(data[-1]) != 4096 else 0.1
     return ("".join(data)).strip()
 
 
@@ -328,13 +342,13 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
            verbose: verbosity level."""
     nexttime = time.time()
     if opts.get("old", 0) > 0 and not collector:
+        oldtime = nexttime - interval * opts["old"]
         try:
-            history = json.loads(query_service("history", opts.get(
-                "port", DefaultPort)))
+            history = json.loads(query_service(
+                "history %f" % (oldtime - 10), opts.get("port", DefaultPort)))
         except Exception:
             history = {}
         if "time" in history and len(history["time"]):
-            oldtime = nexttime - interval * opts["old"]
             pos = -len(history["time"])
             while oldtime < nexttime - interval * 0.5:
                 if oldtime >= history["time"][pos]:
@@ -405,13 +419,15 @@ if __name__ == "__main__":
             verbose -= 1
         elif arg in ("-v", "/v", "--verbose", "/verbose"):
             verbose += 1
-        elif arg in ['install', 'remove', 'start', 'stop']:
+        elif arg in ('install', 'remove', 'start', 'stop'):
             windowsService = True
         elif not frequency and arg.isdigit():
             frequency = int(arg)
+        elif arg in ("-h", "/h", "/?", "--help", "/help"):
+            help = "help"
         else:
             help = True
-    if help:
+    if (help and not windowsService) or help == "help":
         print """Run or query a loadavg service on windows.
 
 Syntax: loadavg.py install|remove|start|stop
@@ -419,8 +435,17 @@ Syntax: loadavg.py install|remove|start|stop
   (frequency) --count=(count) --old=(count)
   --port=(port) --browse -q -v
 
-If one of install, remove, start, or stop is used, this program will be treated
-  as a Windows service.  The other command line parameters are ignored.
+If one of 'install', 'remove', 'start', or 'stop' is used, this program will be
+treated as a Windows service.  The other command line parameters are ignored,
+and a different set of options are available (which must be placed before the
+service action):
+  Options for 'install' and 'update' commands only:
+    --username (domain\\username) : username the service is to run under.
+    --password (password) : password for the username.
+    --startup [manual|auto|disabled] : how the service starts (default is
+      manual).
+  Options for 'start' and 'stop' commands only:
+    --wait (seconds): wait for the service to actually start or stop.
 --browse shows the performance counters browse dialog.
 --count specifies how many records to print when a frequency is specified.
 --disk queries the disk load average.
@@ -452,8 +477,8 @@ the Windows performance counter of processor queue length.  It also has a
 similar set of values for disk queue.  The value shown for load is the same as
 that shown in linux, except the most recent pid is not shown.
 
-This needs to run in the background (as a service, for instance) with the
---service flag.  It can then be run as desired to get the current loadavg
+This needs to run in the background (as a service, for instance, or with the
+--service flag).  It can then be run as desired to get the current loadavg
 values.
 
 If this fails because the expected performance counters are unavailable, try

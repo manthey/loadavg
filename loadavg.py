@@ -245,6 +245,7 @@ class LoadAvgService(threading.Thread):
 class LoadAvgSvc(win32serviceutil.ServiceFramework):
     _svc_name_ = "LoadAvgSvc"
     _svc_display_name_ = "Loadavg for Windows Service"
+    _svc_description_ = """Provide loadavg for Windows, including a limited amount of history."""
 
     import loadavg
     svcPath = (os.path.splitext(os.path.abspath(loadavg.__file__))[0] + '.' +

@@ -21,7 +21,7 @@ import win32serviceutil
 
 DefaultPort = 24047
 
-        
+
 avgWeights = {
     1:  {"bits": 11, "w": 1884},  # 1884 = (1<<11)/exp(5sec/60sec)
     5:  {"bits": 11, "w": 2014},  # 2014 = (1<<11)/exp(5sec/300sec)
@@ -133,7 +133,7 @@ class LoadAvgCollect(threading.Thread):
             self.lock.acquire()
             for key in state:
                 self.state[key] = state[key]
-                if not key in self.history:
+                if key not in self.history:
                     self.history[key] = []
                 self.history[key] = self.history[key][-self.maxhistory:]
                 self.history[key].append(state[key])
@@ -333,13 +333,15 @@ def query_service(cmd="load", port=DefaultPort, verbose=0):
     while True:
         rs, ws, es = select.select([sock], [], [], timeout)
         if not len(rs):
+            if verbose >= 2:
+                print 'Failed to select'
             break
         data.append(sock.recv(4096))
         if verbose >= 4:
             print 'received %d byte(s)' % len(data[-1])
         if not len(data[-1]):
             break
-        timeout = 0 if len(data[-1]) != 4096 else 0.1
+        timeout = 0.05 if len(data[-1]) != 4096 else 0.1
     data = "".join(data)
     if verbose >= 3:
         print 'received %d byte(s): %r' % (len(data), data)
@@ -363,7 +365,7 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
             history = json.loads(query_service(
                 "history %f" % (oldtime - 10), opts.get("port", DefaultPort),
                 verbose))
-        except Exception as e:
+        except Exception:
             if verbose >= 3:
                 print traceback.format_exc()
             history = {}

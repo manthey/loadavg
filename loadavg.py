@@ -11,6 +11,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 import weakref
 import win32pdh
 import win32event
@@ -20,7 +21,7 @@ import win32serviceutil
 
 DefaultPort = 24047
 
-        
+
 avgWeights = {
     1:  {"bits": 11, "w": 1884},  # 1884 = (1<<11)/exp(5sec/60sec)
     5:  {"bits": 11, "w": 2014},  # 2014 = (1<<11)/exp(5sec/300sec)
@@ -132,7 +133,7 @@ class LoadAvgCollect(threading.Thread):
             self.lock.acquire()
             for key in state:
                 self.state[key] = state[key]
-                if not key in self.history:
+                if key not in self.history:
                     self.history[key] = []
                 self.history[key] = self.history[key][-self.maxhistory:]
                 self.history[key].append(state[key])
@@ -201,10 +202,14 @@ class LoadAvgService(threading.Thread):
             result = json.dumps(history)
         else:
             result = "failed - unknown command"
-        rs, ws, es = select.select([], [sock], [], timeout)
-        if not len(ws):
-            return
-        sock.send(result)
+        dataleft = result
+        while len(dataleft):
+            rs, ws, es = select.select([], [sock], [], timeout)
+            if not len(ws):
+                return
+            bytessent = sock.send(dataleft)
+            dataleft = dataleft[bytessent:]
+            timeout = 1
         if cmd == "end":
             self.halt = True
 
@@ -240,6 +245,7 @@ class LoadAvgService(threading.Thread):
 class LoadAvgSvc(win32serviceutil.ServiceFramework):
     _svc_name_ = "LoadAvgSvc"
     _svc_display_name_ = "Loadavg for Windows Service"
+    _svc_description_ = """Provide loadavg for Windows, including a limited amount of history."""
 
     import loadavg
     svcPath = (os.path.splitext(os.path.abspath(loadavg.__file__))[0] + '.' +
@@ -299,10 +305,11 @@ def formatState(state, mode="load"):
         state["numproc"])
 
 
-def query_service(cmd="load", port=DefaultPort):
+def query_service(cmd="load", port=DefaultPort, verbose=0):
     """Query the running service.
     Enter: cmd: the command to send to the service.
            port: the port of the service to query.
+           verbose: verbosity level.
     Exit:  result: the reply from the service."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -314,20 +321,31 @@ def query_service(cmd="load", port=DefaultPort):
     except socket.error:
         return "Failed - can't connect socket"
     timeout = 5
+    if verbose >= 4:
+        print 'sending cmd ' + cmd
     rs, ws, es = select.select([], [sock], [], timeout)
     if not len(ws):
         return "Failed - socket not receiving"
     sock.send(cmd)
+    if verbose >= 3:
+        print 'sent cmd ' + cmd
     data = []
     while True:
         rs, ws, es = select.select([sock], [], [], timeout)
         if not len(rs):
+            if verbose >= 2:
+                print 'Failed to select'
             break
         data.append(sock.recv(4096))
+        if verbose >= 4:
+            print 'received %d byte(s)' % len(data[-1])
         if not len(data[-1]):
             break
-        timeout = 0 if len(data[-1]) != 4096 else 0.1
-    return ("".join(data)).strip()
+        timeout = 0.05 if len(data[-1]) != 4096 else 0.1
+    data = "".join(data)
+    if verbose >= 3:
+        print 'received %d byte(s): %r' % (len(data), data)
+    return data.strip()
 
 
 def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
@@ -345,8 +363,11 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
         oldtime = nexttime - interval * opts["old"]
         try:
             history = json.loads(query_service(
-                "history %f" % (oldtime - 10), opts.get("port", DefaultPort)))
+                "history %f" % (oldtime - 10), opts.get("port", DefaultPort),
+                verbose))
         except Exception:
+            if verbose >= 3:
+                print traceback.format_exc()
             history = {}
         if "time" in history and len(history["time"]):
             pos = -len(history["time"])
@@ -370,7 +391,8 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
             if not first or cmd != "run":
                 curtime = time.time()
                 if not collector:
-                    val = query_service(cmd, opts.get("port", DefaultPort))
+                    val = query_service(cmd, opts.get("port", DefaultPort),
+                                        verbose)
                 else:
                     val = collector.format(mode=cmd)
                 if verbose:
@@ -506,4 +528,4 @@ running the following:
     elif frequency:
         query_service_loop(mode, opts, frequency, collector, verbose)
     else:
-        print query_service(mode, opts["port"])
+        print query_service(mode, opts["port"], verbose)

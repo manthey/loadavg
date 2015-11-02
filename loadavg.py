@@ -21,7 +21,7 @@ import win32serviceutil
 
 DefaultPort = 24047
 
-        
+
 avgWeights = {
     1:  {"bits": 11, "w": 1884},  # 1884 = (1<<11)/exp(5sec/60sec)
     5:  {"bits": 11, "w": 2014},  # 2014 = (1<<11)/exp(5sec/300sec)
@@ -48,6 +48,8 @@ class LoadAvgCollect(threading.Thread):
             "diskload": r"\LogicalDisk(_Total)\Current Disk Queue Length",
             "numproc": r"\System\Processes",
             "percent": r"\Processor(_Total)\% Processor Time",
+            # "diskidle": r"\PhysicalDisk(_Total)\% Idle Time",
+            # "diskidle": r"\PhysicalDisk(0 C:)\% Idle Time",
             }
 
     def format(self, state=None, mode="load"):
@@ -85,7 +87,7 @@ class LoadAvgCollect(threading.Thread):
                     break
         return history
 
-    def run(self):
+    def run(self):  # noqa
         """Collect the data."""
         nexttime = time.time()
         interval = 5
@@ -105,11 +107,11 @@ class LoadAvgCollect(threading.Thread):
             win32pdh.CollectQueryData(query)
             for key in self.fields:
                 chandle = qhandles[key]
-                if key == "percent":
+                if '%' in self.fields[key]:
                     try:
                         (ctype, value) = win32pdh.GetFormattedCounterValue(
                             chandle, win32pdh.PDH_FMT_DOUBLE)
-                    except:
+                    except Exception:
                         value = 0
                 else:
                     (ctype, value) = win32pdh.GetFormattedCounterValue(
@@ -133,7 +135,7 @@ class LoadAvgCollect(threading.Thread):
             self.lock.acquire()
             for key in state:
                 self.state[key] = state[key]
-                if not key in self.history:
+                if key not in self.history:
                     self.history[key] = []
                 self.history[key] = self.history[key][-self.maxhistory:]
                 self.history[key].append(state[key])
@@ -224,7 +226,7 @@ class LoadAvgService(threading.Thread):
             sock.setblocking(0)
             sock.bind(("127.0.0.1", self.port))
             sock.listen(10)
-        except:
+        except Exception:
             self.halt = True
             return
         while not self.halt:
@@ -234,7 +236,7 @@ class LoadAvgService(threading.Thread):
                 continue
             try:
                 (clientsock, addr) = sock.accept()
-            except:
+            except Exception:
                 continue
             clientsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             clientsock.setblocking(0)
@@ -332,20 +334,22 @@ def query_service(cmd="load", port=DefaultPort, verbose=0):
     while True:
         rs, ws, es = select.select([sock], [], [], timeout)
         if not len(rs):
+            if verbose >= 2:
+                print 'Failed to select'
             break
         data.append(sock.recv(4096))
         if verbose >= 4:
             print 'received %d byte(s)' % len(data[-1])
         if not len(data[-1]):
             break
-        timeout = 0 if len(data[-1]) != 4096 else 0.1
+        timeout = 0.05 if len(data[-1]) != 4096 else 0.1
     data = "".join(data)
     if verbose >= 3:
         print 'received %d byte(s): %r' % (len(data), data)
     return data.strip()
 
 
-def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
+def query_service_loop(cmd="load", opts={}, interval=5, collector=None,  # noqa
                        verbose=0):
     """Query the running or internal service repeatedly.
     Enter: cmd: the command to send to the service.
@@ -362,7 +366,7 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
             history = json.loads(query_service(
                 "history %f" % (oldtime - 10), opts.get("port", DefaultPort),
                 verbose))
-        except Exception as e:
+        except Exception:
             if verbose >= 3:
                 print traceback.format_exc()
             history = {}
@@ -411,7 +415,7 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
             break
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # noqa
     help = False
     mode = "load"
     frequency = None

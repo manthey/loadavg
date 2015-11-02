@@ -48,6 +48,8 @@ class LoadAvgCollect(threading.Thread):
             "diskload": r"\LogicalDisk(_Total)\Current Disk Queue Length",
             "numproc": r"\System\Processes",
             "percent": r"\Processor(_Total)\% Processor Time",
+            # "diskidle": r"\PhysicalDisk(_Total)\% Idle Time",
+            # "diskidle": r"\PhysicalDisk(0 C:)\% Idle Time",
             }
 
     def format(self, state=None, mode="load"):
@@ -85,7 +87,7 @@ class LoadAvgCollect(threading.Thread):
                     break
         return history
 
-    def run(self):
+    def run(self):  # noqa
         """Collect the data."""
         nexttime = time.time()
         interval = 5
@@ -105,11 +107,11 @@ class LoadAvgCollect(threading.Thread):
             win32pdh.CollectQueryData(query)
             for key in self.fields:
                 chandle = qhandles[key]
-                if key == "percent":
+                if '%' in self.fields[key]:
                     try:
                         (ctype, value) = win32pdh.GetFormattedCounterValue(
                             chandle, win32pdh.PDH_FMT_DOUBLE)
-                    except:
+                    except Exception:
                         value = 0
                 else:
                     (ctype, value) = win32pdh.GetFormattedCounterValue(
@@ -224,7 +226,7 @@ class LoadAvgService(threading.Thread):
             sock.setblocking(0)
             sock.bind(("127.0.0.1", self.port))
             sock.listen(10)
-        except:
+        except Exception:
             self.halt = True
             return
         while not self.halt:
@@ -234,7 +236,7 @@ class LoadAvgService(threading.Thread):
                 continue
             try:
                 (clientsock, addr) = sock.accept()
-            except:
+            except Exception:
                 continue
             clientsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             clientsock.setblocking(0)
@@ -349,7 +351,7 @@ def query_service(cmd="load", port=DefaultPort, verbose=0):
     return data.strip()
 
 
-def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
+def query_service_loop(cmd="load", opts={}, interval=5, collector=None,  # noqa
                        verbose=0):
     """Query the running or internal service repeatedly.
     Enter: cmd: the command to send to the service.
@@ -415,7 +417,7 @@ def query_service_loop(cmd="load", opts={}, interval=5, collector=None,
             break
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # noqa
     help = False
     mode = "load"
     frequency = None
